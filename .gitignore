@@ -1,0 +1,6 @@
+rke/
+terraform.tfstate
+terraform.tfstate.backup
+*.pem
+*.crt
+*.key
