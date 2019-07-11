@@ -147,7 +147,7 @@ resource "aws_instance" "rancher_server" {
   subnet_id                   = "${tolist(data.aws_subnet_ids.available.ids)[count.index]}"
   associate_public_ip_address = true
 
-#  iam_instance_profile = "${aws_iam_instance_profile.control_plane_instance_profile.name}"
+  iam_instance_profile = "${aws_iam_instance_profile.control_plane_instance_profile.name}"
 
   root_block_device {
     volume_type = "gp2"
@@ -169,7 +169,7 @@ resource "aws_instance" "rancher_worker" {
   subnet_id                   = "${tolist(data.aws_subnet_ids.available.ids)[count.index]}"
   associate_public_ip_address = true
 
-#  iam_instance_profile = "${aws_iam_instance_profile.worker_node_instance_profile.name}"
+  iam_instance_profile = "${aws_iam_instance_profile.worker_node_instance_profile.name}"
 
   root_block_device {
     volume_type = "gp2"
@@ -216,22 +216,22 @@ resource "aws_elb" "rancher" {
 }
 
 # DNS
-#resource "aws_route53_record" "rancher" {
-#  zone_id = "${data.aws_route53_zone.dns_zone.zone_id}"
-#  name    = "${var.cluster_name}.${var.domain_name}"
-#  type    = "A"
+resource "aws_route53_record" "rancher" {
+  zone_id = "${data.aws_route53_zone.dns_zone.zone_id}"
+  name    = "${var.cluster_name}.${var.domain_name}"
+  type    = "A"
 
-#  alias {
-#    name                   = "${aws_elb.rancher.dns_name}"
-#    zone_id                = "${aws_elb.rancher.zone_id}"
-#    evaluate_target_health = true
-#  }
-#}
+  alias {
+    name                   = "${aws_elb.rancher.dns_name}"
+    zone_id                = "${aws_elb.rancher.zone_id}"
+    evaluate_target_health = true
+  }
+}
 
 data "template_file" "rkeClusterConfig" {
   template = <<EOF
-#  cloud_provider:
-#    name: aws
+  cloud_provider:
+    name: aws
   nodes:
     - address: "${aws_instance.rancher_server[0].public_ip}"
       user: "${var.ssh_username}"
