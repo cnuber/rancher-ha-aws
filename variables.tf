@@ -24,7 +24,10 @@ variable "server_instance_type" {
 variable "worker_instance_type" {
   default     = ""
 }
-variable "rancher_server_node_count" {
+variable "rancher_etcd_node_count" {
+  default     = ""
+}
+variable "rancher_control_plane_node_count" {
   default     = ""
 }
 variable "rancher_worker_node_count" {

@@ -136,8 +136,8 @@ data "template_file" "cloud_config" {
 EOF
 }
 
-resource "aws_instance" "rancher_server" {
-  count         = "${var.rancher_server_node_count}"
+resource "aws_instance" "rancher_etcd_node" {
+  count         = "${var.rancher_etcd_node_count}"
   ami           = "${data.aws_ami.ubuntu.image_id}"
   instance_type = "${var.server_instance_type}"
   key_name      = "${aws_key_pair.ssh_key.id}"
@@ -155,6 +155,28 @@ resource "aws_instance" "rancher_server" {
   }
   tags = {
     "Name" = "${var.cluster_name}-server-${count.index}"
+  }
+}
+
+resource "aws_instance" "rancher_control_plane" {
+  count         = "${var.rancher_control_plane_node_count}"
+  ami           = "${data.aws_ami.ubuntu.image_id}"
+  instance_type = "${var.server_instance_type}"
+  key_name      = "${aws_key_pair.ssh_key.id}"
+  user_data     = "${data.template_file.cloud_config.rendered}"
+
+  vpc_security_group_ids      = ["${aws_security_group.rancher.id}"]
+  subnet_id                   = "${tolist(data.aws_subnet_ids.available.ids)[count.index]}"
+  associate_public_ip_address = true
+
+  iam_instance_profile = "${aws_iam_instance_profile.control_plane_instance_profile.name}"
+
+  root_block_device {
+    volume_type = "gp2"
+    volume_size = "50"
+  }
+  tags = {
+    "Name" = "${var.cluster_name}-control-plane-${count.index}"
   }
 }
 
@@ -207,7 +229,7 @@ resource "aws_elb" "rancher" {
     interval            = 5
   }
 
-  instances    = "${aws_instance.rancher_server.*.id}"
+  instances    = "${aws_instance.rancher_control_plane.*.id}"
   idle_timeout = 1800
 
   tags = {
@@ -215,10 +237,32 @@ resource "aws_elb" "rancher" {
   }
 }
 
+resource "aws_elb_attachment" "control_plane_elb_attach" {
+        count    = "${var.rancher_control_plane_node_count}"
+	elb      = "${aws_elb.rancher.id}"
+	instance = "${element(aws_instance.rancher_control_plane.*.id, count.index)}"
+}
+
+resource "aws_elb_attachment" "rancher_etcd_node_elb_attach" {
+        count    = "${var.rancher_etcd_node_count}"
+        elb      = "${aws_elb.rancher.id}"
+        instance = "${element(aws_instance.rancher_etcd_node.*.id, count.index)}"
+}
+
+resource "aws_elb_attachment" "worker_node_elb_attach" {
+        count    = "${var.rancher_worker_node_count}"
+        elb      = "${aws_elb.rancher.id}"
+        instance = "${element(aws_instance.rancher_worker.*.id, count.index)}"
+}
+
+data "aws_route53_zone" "dns_zone" {
+  name = "${var.domain_name}"
+}
+
 # DNS
 resource "aws_route53_record" "rancher" {
   zone_id = "${data.aws_route53_zone.dns_zone.zone_id}"
-  name    = "${var.cluster_name}.${var.domain_name}"
+  name    = "${var.dns_name}"
   type    = "A"
 
   alias {
@@ -233,24 +277,36 @@ data "template_file" "rkeClusterConfig" {
   cloud_provider:
     name: aws
   nodes:
-    - address: "${aws_instance.rancher_server[0].public_ip}"
+    - address: "${aws_instance.rancher_control_plane[0].public_ip}"
       user: "${var.ssh_username}"
       role:
         - controlplane
-        - etcd
-      internal_address: "${aws_instance.rancher_server[0].private_ip}"
-    - address: "${aws_instance.rancher_server[1].public_ip}"
+      internal_address: "${aws_instance.rancher_control_plane[0].private_ip}"
+    - address: "${aws_instance.rancher_control_plane[1].public_ip}"
       user: "${var.ssh_username}"
       role:
         - controlplane
-        - etcd
-      internal_address: "${aws_instance.rancher_server[1].private_ip}"
-    - address: "${aws_instance.rancher_server[2].public_ip}"
+      internal_address: "${aws_instance.rancher_control_plane[1].private_ip}"
+    - address: "${aws_instance.rancher_control_plane[2].public_ip}"
       user: "${var.ssh_username}"
       role:
         - controlplane
+      internal_address: "${aws_instance.rancher_control_plane[2].private_ip}"
+    - address: "${aws_instance.rancher_etcd_node[0].public_ip}"
+      user: "${var.ssh_username}"
+      role:
         - etcd
-      internal_address: "${aws_instance.rancher_server[2].private_ip}"
+      internal_address: "${aws_instance.rancher_etcd_node[0].private_ip}"
+    - address: "${aws_instance.rancher_etcd_node[1].public_ip}"
+      user: "${var.ssh_username}"
+      role:
+        - etcd
+      internal_address: "${aws_instance.rancher_etcd_node[1].private_ip}"
+    - address: "${aws_instance.rancher_etcd_node[2].public_ip}"
+      user: "${var.ssh_username}"
+      role:
+        - etcd
+      internal_address: "${aws_instance.rancher_etcd_node[2].private_ip}"
     - address: "${aws_instance.rancher_worker[0].public_ip}"
       user: "${var.ssh_username}"
       role:
