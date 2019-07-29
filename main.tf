@@ -1,3 +1,9 @@
+terraform {
+  required_version = "~> 0.12"
+
+  backend "s3" {
+  }
+}
 provider "aws" {
   profile = "${var.aws_profile}"
   region  = "${var.aws_region}"
@@ -57,6 +63,9 @@ resource "aws_security_group" "rancher-elb" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -155,6 +164,7 @@ resource "aws_instance" "rancher_etcd_node" {
   }
   tags = {
     "Name" = "${var.cluster_name}-server-${count.index}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -177,6 +187,7 @@ resource "aws_instance" "rancher_control_plane" {
   }
   tags = {
     "Name" = "${var.cluster_name}-control-plane-${count.index}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -199,6 +210,7 @@ resource "aws_instance" "rancher_worker" {
   }
   tags = {
     "Name" = "${var.cluster_name}-worker-${count.index}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -234,6 +246,7 @@ resource "aws_elb" "rancher" {
 
   tags = {
     Name = "${var.cluster_name}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
 }
 
@@ -274,8 +287,18 @@ resource "aws_route53_record" "rancher" {
 
 data "template_file" "rkeClusterConfig" {
   template = <<EOF
+  cluster_name: "${var.cluster_name}"
+  kubernetes_version: "${var.kubernetes_version}"
   cloud_provider:
     name: aws
+  services:
+    etcd:
+      backup_config:
+        interval_hours: 12
+        retention: 6
+        bucket_name: "rancher-${var.cluster_name}-backups"
+        region: "${var.aws_region}"
+        endpoint: s3.amazonaws.com
   nodes:
     - address: "${aws_instance.rancher_control_plane[0].public_ip}"
       user: "${var.ssh_username}"
@@ -312,12 +335,57 @@ data "template_file" "rkeClusterConfig" {
       role:
         - worker
       internal_address: "${aws_instance.rancher_worker[0].private_ip}"
+    - address: "${aws_instance.rancher_worker[1].public_ip}"
+      user: "${var.ssh_username}"
+      role:
+        - worker
+      internal_address: "${aws_instance.rancher_worker[1].private_ip}"
+    - address: "${aws_instance.rancher_worker[2].public_ip}"
+      user: "${var.ssh_username}"
+      role:
+        - worker
+      internal_address: "${aws_instance.rancher_worker[2].private_ip}"
+  addons: |-
+    ---
+    kind: StorageClass
+    apiVersion: storage.k8s.io/v1
+    metadata:
+      name: standard
+      annotations:
+        storageclass.kubernetes.io/is-default-class: "true"
+    provisioner: kubernetes.io/aws-ebs
+    parameters:
+      type: gp2
 EOF
 }
 
 resource "local_file" "rkeClusterConfig" {
     content     = "${data.template_file.rkeClusterConfig.rendered}"
     filename = "${path.module}/rke/${var.cluster_name}-cluster.yml"
+}
+
+resource "null_resource" "control_plane_subnet_tags" {
+  count = "${var.rancher_control_plane_node_count}"
+  provisioner "local-exec" {
+    command = "aws --region ${var.aws_region} --profile ${var.aws_profile} ec2 create-tags --resources ${aws_instance.rancher_control_plane[count.index].subnet_id} --tags Key=\"kubernetes.io/cluster/${var.cluster_name}\",Value=\"shared\""
+  }
+}
+
+resource "null_resource" "etcd_node_subnet_tags" {
+  count = "${var.rancher_etcd_node_count}"
+  provisioner "local-exec" {
+    command = "aws --region ${var.aws_region} --profile ${var.aws_profile} ec2 create-tags --resources ${aws_instance.rancher_etcd_node[count.index].subnet_id} --tags Key=\"kubernetes.io/cluster/${var.cluster_name}\",Value=\"shared\""
+  }
+}
+
+resource "null_resource" "worker_node_subnet_tags" {
+  count = "${var.rancher_worker_node_count}"
+  provisioner "local-exec" {
+    command = "aws --region ${var.aws_region} --profile ${var.aws_profile} ec2 create-tags --resources ${aws_instance.rancher_worker[count.index].subnet_id} --tags Key=\"kubernetes.io/cluster/${var.cluster_name}\",Value=\"shared\""
+  }
+}
+
+resource "null_resource" "rke_deploy" {
 
   provisioner "local-exec" {
     command = "sleep 300"

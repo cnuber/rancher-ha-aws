@@ -57,7 +57,8 @@
       "elasticloadbalancing:RegisterTargets",
       "elasticloadbalancing:SetLoadBalancerPoliciesOfListener",
       "iam:CreateServiceLinkedRole",
-      "kms:DescribeKey"
+      "kms:DescribeKey",
+      "s3:*"
     ],
     "Resource": [
       "*"

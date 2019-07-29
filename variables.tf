@@ -48,6 +48,9 @@ variable "prefix" {
 variable "rancher_version" {
   default     = ""
 }
+variable "kubernetes_version" {
+  default     = ""
+}
 variable "docker_version" {
   default     = ""
 }
